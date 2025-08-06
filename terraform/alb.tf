@@ -1,61 +1,69 @@
-# Application Load Balancer
-resource "aws_lb" "app_lb" {
-  name               = "django-nextjs-alb"
+# Frontend ALB
+resource "aws_lb" "frontend_alb" {
+  name               = "frontend-alb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.lb_sg.id]
-  subnets            = data.aws_subnets.public.ids
+  subnets            = aws_subnet.public[*].id
 }
 
-# Target Groups
+# Backend ALB
+resource "aws_lb" "backend_alb" {
+  name               = "backend-alb"
+  internal           = true  # Internal ALB for backend
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.lb_sg.id]
+  subnets            = aws_subnet.private[*].id
+}
+
+# Frontend Target Group
 resource "aws_lb_target_group" "frontend_tg" {
   name        = "frontend-tg"
   port        = 3000
   protocol    = "HTTP"
   target_type = "ip"
-  vpc_id      = data.aws_vpc.default.id
-
+  vpc_id      = aws_vpc.main.id
   health_check {
     path = "/"
   }
 }
 
+# Backend Target Group
 resource "aws_lb_target_group" "backend_tg" {
   name        = "backend-tg"
   port        = 8000
   protocol    = "HTTP"
   target_type = "ip"
-  vpc_id      = data.aws_vpc.default.id
-
+  vpc_id      = aws_vpc.main.id
   health_check {
-    path = "/health/"
+    enabled             = true
+    path                = "/health/"
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    matcher             = "200-399"
   }
 }
 
-# Listener and Routing Rules
+# Frontend Listener
 resource "aws_lb_listener" "frontend" {
-  load_balancer_arn = aws_lb.app_lb.arn
+  load_balancer_arn = aws_lb.frontend_alb.arn
   port              = "80"
   protocol          = "HTTP"
-
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.frontend_tg.arn
   }
 }
 
-resource "aws_lb_listener_rule" "backend" {
-  listener_arn = aws_lb_listener.frontend.arn
-  priority     = 100
-
-  action {
+# Backend Listener
+resource "aws_lb_listener" "backend" {
+  load_balancer_arn = aws_lb.backend_alb.arn
+  port              = "80"
+  protocol          = "HTTP"
+  default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.backend_tg.arn
-  }
-
-  condition {
-    path_pattern {
-      values = ["/api/*"]
-    }
   }
 }

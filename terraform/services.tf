@@ -8,8 +8,8 @@ resource "aws_ecs_service" "frontend" {
   health_check_grace_period_seconds = 60
 
   network_configuration {
-    subnets          = data.aws_subnets.public.ids
-    security_groups  = [aws_security_group.ecs_sg.id]
+    subnets          = aws_subnet.public[*].id
+    security_groups  = [aws_security_group.frontend_ecs_sg.id]
     assign_public_ip = true
   }
 
@@ -19,7 +19,6 @@ resource "aws_ecs_service" "frontend" {
     container_port   = 3000
   }
 }
-
 # Backend Service (Django - Private Subnet)
 resource "aws_ecs_service" "backend" {
   name            = "backend-service"
@@ -29,9 +28,9 @@ resource "aws_ecs_service" "backend" {
   desired_count   = 1
 
   network_configuration {
-    subnets          = data.aws_subnets.private.ids  # Private subnet
-    security_groups  = [aws_security_group.ecs_sg.id]
-    assign_public_ip = false  # No public IP needed
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.backend_ecs_sg.id]
+    assign_public_ip = false
   }
 
   load_balancer {
@@ -39,4 +38,5 @@ resource "aws_ecs_service" "backend" {
     container_name   = "django-backend"
     container_port   = 8000
   }
+  health_check_grace_period_seconds = 120
 }
