@@ -22,11 +22,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = "django-insecure-k*rrfqk!9zr39ed7aq2u(d+ow1a8a=&klxapq835bn(*c0_fq8"
 
+import os
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
+ALLOWED_HOSTS = ['*']
+if os.getenv('DJANGO_ALLOWED_HOSTS'):
+    ALLOWED_HOSTS.extend(os.getenv('DJANGO_ALLOWED_HOSTS').split(','))
 
 # Application definition
 

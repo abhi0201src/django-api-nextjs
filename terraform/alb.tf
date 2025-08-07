@@ -10,7 +10,7 @@ resource "aws_lb" "frontend_alb" {
 # Backend ALB
 resource "aws_lb" "backend_alb" {
   name               = "backend-alb"
-  internal           = true  # Internal ALB for backend
+  internal           = false  # Internal ALB for backend
   load_balancer_type = "application"
   security_groups    = [aws_security_group.lb_sg.id]
   subnets            = aws_subnet.private[*].id

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite3
+
+# Environment
+.env
+.env.local
+.env.prod
+
+# System
+.DS_Store
+Thumbs.db
+
+# Development
+.git/
+.vscode/
+.idea/
+*.log
+logs/
+
+# Frontend contamination (if any)
+node_modules/
+.next/
+out/

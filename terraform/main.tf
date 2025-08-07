@@ -114,7 +114,6 @@ resource "aws_ecs_task_definition" "frontend" {
   }])
 }
 
-# Backend Task Definition
 resource "aws_ecs_task_definition" "backend" {
   family                   = "django-backend"
   network_mode             = "awsvpc"
@@ -123,12 +122,73 @@ resource "aws_ecs_task_definition" "backend" {
   memory                   = "1024"
   execution_role_arn       = aws_iam_role.ecs_execution_role.arn
 
-  container_definitions = jsonencode([{
-    name      = "django-backend",
-    image     = "${var.aws_account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${var.backend_image_repo}:latest",
-    portMappings = [{
-      containerPort = 8000,
-      hostPort      = 8000
-    }],
-  }])
+  container_definitions = jsonencode([
+    {
+      name      = "django-migrate",
+      image     = "${var.aws_account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${var.backend_image_repo}:latest",
+      essential = false,
+      command   = ["python", "manage.py", "migrate"],
+      logConfiguration = {
+        logDriver = "awslogs",
+        options = {
+          "awslogs-group"         = "/ecs/backend",
+          "awslogs-region"        = var.aws_region,
+          "awslogs-stream-prefix" = "ecs"
+        }
+      },
+      environment = [
+        {
+          name  = "DJANGO_ALLOWED_HOSTS",
+          value = join(",", [
+            aws_lb.backend_alb.dns_name,
+            "localhost",
+            "127.0.0.1",
+            var.vpc_cidr
+          ])
+        }
+      ]
+    },
+    {
+      name      = "django-backend",
+      image     = "${var.aws_account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${var.backend_image_repo}:latest",
+      essential = true,
+      portMappings = [{
+        containerPort = 8000,
+        hostPort      = 8000,
+        protocol      = "tcp"
+      }],
+      logConfiguration = {
+        logDriver = "awslogs",
+        options = {
+          "awslogs-group"         = "/ecs/backend",
+          "awslogs-region"        = var.aws_region,
+          "awslogs-stream-prefix" = "ecs"
+        }
+      },
+      healthCheck = {
+        command     = ["CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1"],
+        interval    = 30,
+        timeout     = 5,
+        retries     = 3,
+        startPeriod = 60
+      },
+      environment = [
+        {
+          name  = "DJANGO_ALLOWED_HOSTS",
+          value = join(",", [
+            aws_lb.backend_alb.dns_name,
+            "localhost",
+            "127.0.0.1",
+            var.vpc_cidr
+          ])
+        }
+      ],
+      dependsOn = [
+        {
+          containerName = "django-migrate",
+          condition     = "SUCCESS"
+        }
+      ]
+    }
+  ])
 }

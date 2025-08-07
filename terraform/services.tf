@@ -38,5 +38,5 @@ resource "aws_ecs_service" "backend" {
     container_name   = "django-backend"
     container_port   = 8000
   }
-  health_check_grace_period_seconds = 120
+  health_check_grace_period_seconds = 200
 }
