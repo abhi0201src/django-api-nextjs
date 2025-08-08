@@ -1,0 +1,14 @@
+terraform {
+  backend "s3" {
+    bucket         = "devopsbackend-new"
+    key            = "terraform/django-nextjs-app/terraform.tfstate"
+    region         = "us-west-2"
+    encrypt        = true
+    
+    # Optional: Enable versioning and server-side encryption
+    versioning = true
+    
+    # Workspace support for multiple environments
+    workspace_key_prefix = "workspaces"
+  }
+}

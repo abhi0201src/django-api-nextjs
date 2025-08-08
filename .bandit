@@ -1,0 +1,13 @@
+exclude_dirs:
+  - ./menu-frontend/node_modules
+  - ./menu-frontend/.next
+  - ./venv
+  - ./__pycache__
+  - ./*/migrations
+  - ./.git
+
+skips:
+  - B101  # Skip assert_used warnings
+
+confidence: medium
+severity: medium

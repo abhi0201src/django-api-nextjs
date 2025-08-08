@@ -9,8 +9,11 @@ Add these secrets to your repository:
 ```
 AWS_ACCESS_KEY_ID=your_access_key
 AWS_SECRET_ACCESS_KEY=your_secret_key
+DJANGO_SECRET_KEY=your_django_secret_key
 ALERT_EMAIL=your-email@company.com
 ```
+
+**Security Note**: See `SECRETS_SETUP.md` for detailed setup instructions and security best practices.
 
 ### 2. GitHub Environments
 Create these environments in your repository settings:
