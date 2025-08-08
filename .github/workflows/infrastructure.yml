@@ -1,0 +1,314 @@
+name: Infrastructure Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/infrastructure.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm infrastructure destruction'
+        required: false
+        type: string
+
+env:
+  AWS_REGION: us-west-2
+  TF_VERSION: "1.6"
+
+jobs:
+  validate:
+    name: Validate Infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: ./terraform
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./terraform
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: ./terraform
+
+  plan:
+    name: Plan Infrastructure
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    outputs:
+      tfplan: ${{ steps.plan.outputs.tfplan }}
+      environment: ${{ steps.env.outputs.environment }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Determine Environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./terraform
+
+      - name: Select Terraform Workspace
+        run: |
+          terraform workspace select ${{ steps.env.outputs.environment }} || terraform workspace new ${{ steps.env.outputs.environment }}
+        working-directory: ./terraform
+
+      - name: Create tfvars file
+        run: |
+          cat > terraform.tfvars <<EOF
+          aws_region = "${{ env.AWS_REGION }}"
+          project_name = "django-nextjs-app"
+          environment = "${{ steps.env.outputs.environment }}"
+          
+          backend_environment_variables = {
+            DEBUG = "False"
+          }
+          
+          default_tags = {
+            Project     = "django-nextjs-app"
+            Environment = "${{ steps.env.outputs.environment }}"
+            ManagedBy   = "terraform"
+            GitCommit   = "${{ github.sha }}"
+          }
+          
+          alert_email_addresses = [
+            "${{ secrets.ALERT_EMAIL }}"
+          ]
+          EOF
+        working-directory: ./terraform
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          if [ "${{ github.event.inputs.action }}" = "destroy" ]; then
+            terraform plan -destroy -out=tfplan -var-file=terraform.tfvars
+          else
+            terraform plan -out=tfplan -var-file=terraform.tfvars
+          fi
+        working-directory: ./terraform
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ steps.env.outputs.environment }}
+          path: terraform/tfplan
+          retention-days: 7
+
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `
+            #### Terraform Infrastructure Plan 📋 \`${{ steps.plan.outcome }}\`
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`terraform
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+            
+            </details>
+            
+            *Environment: ${{ steps.env.outputs.environment }}*
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+  apply:
+    name: Apply Infrastructure
+    runs-on: ubuntu-latest
+    needs: [validate, plan]
+    if: |
+      (github.event_name == 'workflow_dispatch' && 
+       (github.event.inputs.action == 'apply' || github.event.inputs.action == 'destroy')) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    environment: 
+      name: ${{ needs.plan.outputs.environment }}
+      url: ${{ steps.outputs.outputs.application_url }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate Destroy Action
+        if: github.event.inputs.action == 'destroy'
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" != "DESTROY" ]; then
+            echo "Error: You must type 'DESTROY' to confirm infrastructure destruction"
+            exit 1
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ needs.plan.outputs.environment }}
+          path: terraform/
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./terraform
+
+      - name: Select Terraform Workspace
+        run: terraform workspace select ${{ needs.plan.outputs.environment }}
+        working-directory: ./terraform
+
+      - name: Terraform Apply
+        id: apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: ./terraform
+
+      - name: Get Terraform Outputs
+        id: outputs
+        if: github.event.inputs.action != 'destroy'
+        run: |
+          # Check if terraform state has resources
+          if terraform show -json | jq -e '.values.root_module.resources | length > 0' > /dev/null 2>&1; then
+            echo "alb_dns_name=$(terraform output -raw alb_dns_name 2>/dev/null || echo 'Not available')" >> $GITHUB_OUTPUT
+            echo "application_url=http://$(terraform output -raw alb_dns_name 2>/dev/null || echo 'infrastructure-not-ready')" >> $GITHUB_OUTPUT
+            echo "backend_ecr_url=$(terraform output -raw backend_ecr_repository_url 2>/dev/null || echo 'Not available')" >> $GITHUB_OUTPUT
+            echo "frontend_ecr_url=$(terraform output -raw frontend_ecr_repository_url 2>/dev/null || echo 'Not available')" >> $GITHUB_OUTPUT
+            echo "cluster_name=$(terraform output -raw cluster_name 2>/dev/null || echo 'Not available')" >> $GITHUB_OUTPUT
+          else
+            echo "No infrastructure deployed yet"
+            echo "alb_dns_name=Not deployed" >> $GITHUB_OUTPUT
+            echo "application_url=Not available" >> $GITHUB_OUTPUT
+            echo "backend_ecr_url=Not available" >> $GITHUB_OUTPUT
+            echo "frontend_ecr_url=Not available" >> $GITHUB_OUTPUT
+            echo "cluster_name=Not available" >> $GITHUB_OUTPUT
+          fi
+        working-directory: ./terraform
+
+      - name: Infrastructure Summary
+        run: |
+          echo "## Infrastructure Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Environment: ${{ needs.plan.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "### Action: ${{ github.event.inputs.action || 'apply' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.action }}" != "destroy" ]; then
+            echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| ALB DNS | \`${{ steps.outputs.outputs.alb_dns_name }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Application URL | ${{ steps.outputs.outputs.application_url }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Backend ECR | \`${{ steps.outputs.outputs.backend_ecr_url }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Frontend ECR | \`${{ steps.outputs.outputs.frontend_ecr_url }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| ECS Cluster | \`${{ steps.outputs.outputs.cluster_name }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Infrastructure ready for application deployment!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🔥 Infrastructure destroyed successfully" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Trigger Application Pipeline
+        if: steps.outputs.outputs.alb_dns_name != 'Not available' && github.event.inputs.action != 'destroy'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'application.yml',
+              ref: context.ref,
+              inputs: {
+                environment: '${{ needs.plan.outputs.environment }}',
+                backend_ecr_url: '${{ steps.outputs.outputs.backend_ecr_url }}',
+                frontend_ecr_url: '${{ steps.outputs.outputs.frontend_ecr_url }}',
+                cluster_name: '${{ steps.outputs.outputs.cluster_name }}'
+              }
+            });
+
+  notify:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: [plan, apply]
+    if: always()
+    steps:
+      - name: Send Notification
+        if: failure() && contains(secrets.ALERT_EMAIL, '@')
+        run: |
+          echo "Infrastructure pipeline failed for environment: ${{ needs.plan.outputs.environment }}"
+          echo "Action: ${{ github.event.inputs.action || 'apply' }}"
+          echo "Commit: ${{ github.sha }}"
+          # Add email notification logic here if needed
