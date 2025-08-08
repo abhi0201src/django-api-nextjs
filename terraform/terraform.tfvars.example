@@ -1,0 +1,33 @@
+# AWS Configuration
+aws_region = "us-west-2"
+
+# Project Configuration
+project_name = "django-nextjs-app"
+environment  = "dev"
+
+# Docker Images (update these after pushing to ECR)
+# You'll need to push your images to ECR first, then update these values
+backend_image  = "your-account-id.dkr.ecr.us-west-2.amazonaws.com/django-nextjs-app-dev-backend:latest"
+frontend_image = "your-account-id.dkr.ecr.us-west-2.amazonaws.com/django-nextjs-app-dev-frontend:latest"
+
+# SSL Certificate (optional)
+# certificate_arn = "arn:aws:acm:us-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012"
+
+# Domain Name (optional)
+# domain_name = "your-domain.com"
+
+# Backend Environment Variables
+backend_environment_variables = {
+  DEBUG = "False"
+  # Add other environment variables as needed
+  # DATABASE_URL = "your-database-url"
+  # SECRET_KEY = "your-secret-key"
+}
+
+# Default Tags
+default_tags = {
+  Project     = "django-nextjs-app"
+  Environment = "dev"
+  ManagedBy   = "terraform"
+  Owner       = "your-team"
+}

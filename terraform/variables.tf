@@ -1,56 +1,104 @@
-# Required variables
-variable "aws_account_id" {
-  description = "AWS Account ID"
+variable "aws_region" {
+  description = "AWS region"
   type        = string
+  default     = "us-west-2"
+}
+
+variable "project_name" {
+  description = "Name of the project"
+  type        = string
+  default     = "django-nextjs-app"
+}
+
+variable "environment" {
+  description = "Environment (dev, staging, prod)"
+  type        = string
+  default     = "dev"
+}
+
+variable "certificate_arn" {
+  description = "SSL certificate ARN for HTTPS (optional)"
+  type        = string
+  default     = ""
+}
+
+variable "domain_name" {
+  description = "Domain name for the application (optional)"
+  type        = string
+  default     = ""
+}
+
+variable "backend_environment_variables" {
+  description = "Environment variables for backend"
+  type        = map(string)
+  default = {
+    DEBUG = "False"
+  }
+}
+
+variable "default_tags" {
+  description = "Default tags to apply to all resources"
+  type        = map(string)
+  default = {
+    Project     = "django-nextjs-app"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+  }
+}
+
+# Monitoring Configuration
+variable "alert_email_addresses" {
+  description = "List of email addresses to receive CloudWatch alerts"
+  type        = list(string)
+  default     = []
+}
+
+variable "slack_webhook_url" {
+  description = "Slack webhook URL for notifications"
+  type        = string
+  default     = ""
   sensitive   = true
 }
 
-variable "aws_region" {
-  description = "AWS Region"
-  type        = string
-  default     = "us-east-1"
+# Monitoring Thresholds
+variable "cpu_threshold_high" {
+  description = "CPU utilization threshold for high CPU alarm (percentage)"
+  type        = number
+  default     = 80
 }
 
-variable "backend_image_repo" {
-  description = "ECR repo for backend"
-  type        = string
-  default     = "django-backend"
+variable "memory_threshold_high" {
+  description = "Memory utilization threshold for high memory alarm (percentage)"
+  type        = number
+  default     = 80
 }
 
-variable "frontend_image_repo" {
-  description = "ECR repo for frontend"
-  type        = string
-  default     = "nextjs-frontend"
+variable "min_running_tasks" {
+  description = "Minimum number of running tasks before triggering alarm"
+  type        = number
+  default     = 1
 }
 
-variable "alert_email_endpoint" {
-  description = "Email id to receive alerts"
-  type        = string
-  default     = "abhishek.sa.2001@gmail.com"
+variable "response_time_threshold" {
+  description = "Response time threshold in seconds"
+  type        = number
+  default     = 2.0
 }
 
-# Networking variables
-
-variable "vpc_cidr" {
-  description = "CIDR block for VPC"
-  type        = string
-  default     = "10.0.0.0/16"
+variable "error_5xx_threshold" {
+  description = "5XX error count threshold"
+  type        = number
+  default     = 10
 }
 
-variable "public_subnet_cidrs" {
-  description = "CIDR blocks for public subnets"
-  type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+variable "enable_dashboard" {
+  description = "Enable CloudWatch dashboard"
+  type        = bool
+  default     = true
 }
 
-variable "private_subnet_cidrs" {
-  description = "CIDR blocks for private subnets"
-  type        = list(string)
-  default     = ["10.0.3.0/24", "10.0.4.0/24"]
-}
-
-variable "availability_zones" {
-  description = "Availability zones"
-  type        = list(string)
-  default     = ["us-east-1a", "us-east-1b"]
+variable "enable_custom_metrics" {
+  description = "Enable custom metrics and log groups"
+  type        = bool
+  default     = false
 }

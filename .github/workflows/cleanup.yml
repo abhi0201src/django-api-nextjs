@@ -1,0 +1,175 @@
+name: Cleanup Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to cleanup'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      confirm_destruction:
+        description: 'Type "DESTROY" to confirm infrastructure destruction'
+        required: true
+        type: string
+      force_ecr_cleanup:
+        description: 'Force cleanup ECR repositories (will delete all images)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: us-west-2
+  PROJECT_NAME: django-nextjs-app
+
+jobs:
+  cleanup:
+    name: Cleanup ${{ github.event.inputs.environment }} Environment
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}-cleanup
+    
+    steps:
+    - name: Validate destruction confirmation
+      run: |
+        if [[ "${{ github.event.inputs.confirm_destruction }}" != "DESTROY" ]]; then
+          echo "❌ Destruction not confirmed. Please type 'DESTROY' to confirm."
+          exit 1
+        fi
+        echo "✅ Destruction confirmed"
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.5.0
+        terraform_wrapper: false
+
+    - name: Create terraform.tfvars for cleanup
+      run: |
+        ENVIRONMENT=${{ github.event.inputs.environment }}
+        
+        cat > terraform/terraform.tfvars <<EOF
+        aws_region = "${{ env.AWS_REGION }}"
+        project_name = "${{ env.PROJECT_NAME }}"
+        environment = "${ENVIRONMENT}"
+        
+        backend_environment_variables = {
+          DEBUG = "False"
+          ENVIRONMENT = "${ENVIRONMENT}"
+        }
+        
+        default_tags = {
+          Project     = "${{ env.PROJECT_NAME }}"
+          Environment = "${ENVIRONMENT}"
+          ManagedBy   = "github-actions-cleanup"
+          GitCommit   = "${{ github.sha }}"
+        }
+        
+        # Monitoring Configuration (minimal for cleanup)
+        alert_email_addresses = []
+        
+        # CloudWatch Alarm Thresholds
+        cpu_threshold_high     = 80
+        memory_threshold_high  = 80
+        min_running_tasks      = 1
+        response_time_threshold = 2.0
+        error_5xx_threshold    = 10
+        
+        # Dashboard and Custom Metrics
+        enable_dashboard      = false
+        enable_custom_metrics = false
+        EOF
+
+    - name: Terraform Init
+      run: |
+        cd terraform
+        terraform init
+
+    - name: Clean ECR repositories before destroy
+      if: github.event.inputs.force_ecr_cleanup == 'true'
+      run: |
+        ENVIRONMENT=${{ github.event.inputs.environment }}
+        
+        echo "🧹 Cleaning ECR repositories for environment: ${ENVIRONMENT}"
+        
+        # Make cleanup script executable
+        chmod +x cleanup-ecr.sh
+        
+        # Clean ECR repositories
+        ./cleanup-ecr.sh cleanup
+        
+        echo "✅ ECR repositories cleaned"
+
+    - name: Terraform Plan Destroy
+      id: plan-destroy
+      run: |
+        cd terraform
+        terraform plan -destroy -out=destroy-plan
+      continue-on-error: true
+
+    - name: Show Destroy Plan
+      run: |
+        cd terraform
+        terraform show destroy-plan
+
+    - name: Terraform Destroy
+      if: steps.plan-destroy.outcome == 'success'
+      run: |
+        cd terraform
+        terraform apply -auto-approve destroy-plan
+        echo "✅ Infrastructure destroyed successfully"
+
+    - name: Force ECR cleanup if Terraform destroy failed
+      if: steps.plan-destroy.outcome == 'failure' && github.event.inputs.force_ecr_cleanup == 'true'
+      run: |
+        echo "⚠️ Terraform destroy failed, attempting ECR force cleanup..."
+        chmod +x cleanup-ecr.sh
+        ./cleanup-ecr.sh force-destroy
+
+    - name: Create cleanup summary
+      if: always()
+      run: |
+        ENVIRONMENT=${{ github.event.inputs.environment }}
+        STATUS="${{ steps.plan-destroy.outcome }}"
+        
+        cat >> $GITHUB_STEP_SUMMARY <<EOF
+        # 🧹 Infrastructure Cleanup Summary
+        
+        **Environment:** ${ENVIRONMENT}
+        **Status:** ${STATUS}
+        **Git Commit:** ${{ github.sha }}
+        **Cleanup Date:** $(date -u)
+        
+        ## Actions Performed
+        - ECR Repository Cleanup: ${{ github.event.inputs.force_ecr_cleanup }}
+        - Terraform Destroy: ${STATUS}
+        
+        ## Next Steps
+        - Verify all resources are deleted in AWS Console
+        - Check for any remaining costs in AWS Billing
+        - Review CloudWatch logs for any errors
+        EOF
+
+    - name: Notify cleanup result
+      if: always()
+      run: |
+        ENVIRONMENT=${{ github.event.inputs.environment }}
+        if [[ "${{ steps.plan-destroy.outcome }}" == "success" ]]; then
+          echo "🎉 Successfully cleaned up ${ENVIRONMENT} environment!"
+        else
+          echo "❌ Failed to clean up ${ENVIRONMENT} environment. Please check manually."
+          exit 1
+        fi
