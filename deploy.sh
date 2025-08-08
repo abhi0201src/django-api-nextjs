@@ -262,7 +262,7 @@ trigger_deploy() {
     fi
     
     # Trigger the deployment workflow
-    gh workflow run deploy.yml -f environment="$environment" -f force_deploy="false"
+    gh workflow run deploy.yml -f action="deploy" -f environment="$environment"
     
     log_info "Deployment triggered. Check status with: $0 pipeline-status"
 }
@@ -280,9 +280,51 @@ promote_env() {
     fi
     
     # Trigger the promotion workflow
-    gh workflow run promote.yml -f source_environment="$source_env" -f target_environment="$target_env"
+    gh workflow run deploy.yml -f action="promote" -f source_environment="$source_env" -f target_environment="$target_env"
     
     log_info "Environment promotion triggered. Check status with: $0 pipeline-status"
+}
+
+# Trigger cleanup
+cleanup_pipeline() {
+    local environment=${1:-"dev"}
+    
+    log_warn "Triggering pipeline cleanup for environment: $environment"
+    log_warn "This will destroy all infrastructure in the $environment environment!"
+    
+    if ! command -v gh &> /dev/null; then
+        log_error "GitHub CLI not installed. Please install 'gh' to trigger cleanup."
+        exit 1
+    fi
+    
+    # Confirm destruction
+    read -p "Type 'DESTROY' to confirm: " confirmation
+    if [[ "$confirmation" != "DESTROY" ]]; then
+        log_error "Cleanup cancelled. Must type 'DESTROY' to confirm."
+        exit 1
+    fi
+    
+    # Trigger the cleanup workflow
+    gh workflow run deploy.yml -f action="cleanup" -f environment="$environment" -f confirm_destroy="DESTROY"
+    
+    log_info "Infrastructure cleanup triggered. Check status with: $0 pipeline-status"
+}
+
+# Trigger health check
+health_check_pipeline() {
+    local environment=${1:-"prod"}
+    
+    log_info "Triggering health check for environment: $environment"
+    
+    if ! command -v gh &> /dev/null; then
+        log_error "GitHub CLI not installed. Please install 'gh' to trigger health checks."
+        exit 1
+    fi
+    
+    # Trigger the health check
+    gh workflow run deploy.yml -f action="health-check" -f environment="$environment"
+    
+    log_info "Health check triggered. Check status with: $0 pipeline-status"
 }
 
 # Show help function
@@ -297,16 +339,19 @@ Commands:
     pipeline-status        Check GitHub Actions pipeline status
     trigger-deploy [ENV]   Trigger pipeline deployment (ENV: dev|staging|prod)
     promote SOURCE TARGET  Promote between environments (dev→staging, staging→prod)
+    cleanup-pipeline [ENV] Trigger pipeline cleanup (DANGEROUS!)
+    health-check [ENV]     Trigger pipeline health check
     help                   Show this help message
 
 Local Deployment:
     $0 deploy              # Deploy using local tools
 
-Pipeline Deployment:
-    $0 trigger-deploy      # Trigger dev deployment via GitHub Actions
-    $0 trigger-deploy prod # Trigger prod deployment via GitHub Actions
-    $0 promote dev staging # Promote dev to staging
-    $0 promote staging prod # Promote staging to prod
+Pipeline Operations:
+    $0 trigger-deploy      # Trigger dev deployment via pipeline
+    $0 trigger-deploy prod # Trigger prod deployment via pipeline
+    $0 promote dev staging # Promote dev to staging via pipeline
+    $0 cleanup-pipeline dev # Cleanup dev environment via pipeline
+    $0 health-check prod   # Health check prod environment
 
 Infrastructure Management:
     $0 destroy             # Destroy infrastructure locally
@@ -323,15 +368,19 @@ Environment Variables:
 Examples:
     $0 deploy                           # Local deployment
     $0 trigger-deploy staging           # Pipeline deployment to staging
-    $0 promote dev staging              # Promote dev to staging
+    $0 promote dev staging              # Promote dev to staging via pipeline
+    $0 health-check prod               # Check production health
+    $0 cleanup-pipeline dev            # Cleanup dev environment
     $0 clean-ecr                       # Clean ECR before destroy
-    $0 destroy                         # Destroy infrastructure
+    $0 destroy                         # Destroy infrastructure locally
 
-GitHub Actions Workflows:
-    - deploy.yml:      Automated CI/CD pipeline with multi-environment support
-    - promote.yml:     Environment promotion workflow
-    - cleanup.yml:     Infrastructure cleanup workflow
-    - health-check.yml: Scheduled health monitoring
+Single Pipeline Features:
+    - Unified workflow handling all operations (deploy, promote, cleanup, health-check)
+    - Environment-specific configurations
+    - Conditional job execution based on action
+    - Comprehensive monitoring and alerting
+    - ECR cleanup integration
+    - Health checks and deployment verification
 
 Prerequisites:
     - AWS CLI configured with appropriate credentials
@@ -370,6 +419,12 @@ case "${1:-}" in
             exit 1
         fi
         promote_env "$2" "$3"
+        ;;
+    cleanup-pipeline)
+        cleanup_pipeline "${2:-dev}"
+        ;;
+    health-check)
+        health_check_pipeline "${2:-prod}"
         ;;
     help|--help|-h)
         show_help

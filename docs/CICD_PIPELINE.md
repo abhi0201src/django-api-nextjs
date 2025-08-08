@@ -1,57 +1,30 @@
-# CI/CD Pipeline Documentation
+# Single CI/CD Pipeline Documentation
 
-This repository includes a comprehensive CI/CD pipeline for deploying a Django + Next.js application to AWS ECS using GitHub Actions and Terraform.
+This repository includes a unified CI/CD pipeline for deploying a Django + Next.js application to AWS ECS using GitHub Actions and Terraform.
 
 ## 🚀 Pipeline Overview
 
-The CI/CD pipeline consists of four main workflows:
+The CI/CD pipeline is contained in a single workflow file (`.github/workflows/deploy.yml`) that handles all operations:
 
-### 1. Deploy Workflow (`.github/workflows/deploy.yml`)
+### Single Workflow Features
 **Triggers:** 
 - Push to `main` (deploys to prod)
 - Push to `develop` (deploys to staging) 
-- Manual dispatch with environment selection
+- Pull requests (test-only)
+- Manual dispatch with action selection
 
-**Features:**
-- Multi-environment support (dev, staging, prod)
-- Automated testing (Django tests, security checks)
-- Docker image building and pushing to ECR
-- Infrastructure deployment with Terraform
-- Health checks and deployment verification
+**Actions Available:**
+- **deploy**: Full deployment with tests, build, and infrastructure
+- **promote**: Promote images between environments  
+- **cleanup**: Destroy infrastructure safely
+- **health-check**: Monitor application health
+
+**Key Benefits:**
+- Single workflow file to maintain
+- Conditional job execution
+- Unified pipeline logic
+- Comprehensive action support
 - Environment-specific configurations
-- Deployment summaries and notifications
-
-### 2. Environment Promotion (`.github/workflows/promote.yml`)
-**Triggers:** Manual dispatch only
-
-**Features:**
-- Promotes Docker images between environments
-- Validates promotion paths (dev→staging→prod)
-- Automated infrastructure updates
-- Post-promotion health checks
-- Deployment verification
-
-### 3. Infrastructure Cleanup (`.github/workflows/cleanup.yml`)
-**Triggers:** Manual dispatch only
-
-**Features:**
-- Safe infrastructure destruction
-- ECR repository cleanup
-- Confirmation requirements
-- Environment-specific cleanup
-- Detailed cleanup reporting
-
-### 4. Health Monitoring (`.github/workflows/health-check.yml`)
-**Triggers:** 
-- Scheduled (every 30 minutes)
-- Manual dispatch
-
-**Features:**
-- Automated health checks for all environments
-- ECS service status monitoring
-- Application endpoint testing
-- CloudWatch alarm monitoring
-- Alert generation on failures
 
 ## 🏗️ Architecture
 
