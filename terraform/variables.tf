@@ -36,6 +36,18 @@ variable "backend_environment_variables" {
   }
 }
 
+variable "backend_image" {
+  description = "Docker image for backend"
+  type        = string
+  default     = ""
+}
+
+variable "frontend_image" {
+  description = "Docker image for frontend"
+  type        = string
+  default     = ""
+}
+
 variable "default_tags" {
   description = "Default tags to apply to all resources"
   type        = map(string)
