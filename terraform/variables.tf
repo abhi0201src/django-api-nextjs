@@ -38,24 +38,6 @@ variable "backend_environment_variables" {
   }
 }
 
-variable "default_tags" {
-  description = "Default tags to apply to all resources"
-  type        = map(string)
-  default     = {
-    Project     = "django-nextjs-app"
-    Environment = "dev"
-    ManagedBy   = "terraform"
-  }
-}
-
-variable "backend_environment_variables" {
-  description = "Environment variables for backend"
-  type        = map(string)
-  default = {
-    DEBUG = "False"
-  }
-}
-
 variable "backend_image" {
   description = "Docker image for backend"
   type        = string
