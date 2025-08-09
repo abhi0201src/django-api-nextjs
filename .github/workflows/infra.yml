@@ -1,0 +1,201 @@
+
+name: Build and Deploy Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      destroy:
+        description: 'Destroy infrastructure'
+        type: boolean
+        required: false
+        default: false
+
+env:
+  AWS_REGION: us-west-2
+  TF_WORKING_DIR: ./terraform
+  BACKEND_IMAGE_NAME: backend
+  FRONTEND_IMAGE_NAME: frontend
+
+jobs:
+  terraform-infra:
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform Apply (infra only)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -auto-approve -target=module.ecr -var-file=env/dev.tfvars
+
+      - name: Destroy Infrastructure
+        if: ${{ github.event.inputs.destroy == 'true' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform destroy -auto-approve
+        
+      - name: Terraform Apply (rest infra)
+        if: ${{ github.event.inputs.destroy != 'true' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -auto-approve -var-file=env/dev.tfvars
+
+  build-and-push:
+    if: ${{ github.event.inputs.destroy != 'true' }}
+    needs: terraform-infra
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init for outputs
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init
+
+      - name: Get ECR repo URIs from Terraform output
+        id: tf-output
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          BACKEND_REPO=$(terraform output -raw backend_ecr_repo_url)
+          FRONTEND_REPO=$(terraform output -raw frontend_ecr_repo_url)
+          
+          # Verify outputs are not empty
+          if [ -z "$BACKEND_REPO" ]; then
+            echo "Error: backend_ecr_repo_url output is empty"
+            terraform output
+            exit 1
+          fi
+          if [ -z "$FRONTEND_REPO" ]; then
+            echo "Error: frontend_ecr_repo_url output is empty"
+            terraform output
+            exit 1
+          fi
+          
+          # Set the environment variables
+          echo "BACKEND_REPO=$BACKEND_REPO" >> $GITHUB_ENV
+          echo "FRONTEND_REPO=$FRONTEND_REPO" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Debug ECR repo URIs
+        run: |
+          echo "BACKEND_REPO is: $BACKEND_REPO"
+          echo "FRONTEND_REPO is: $FRONTEND_REPO"
+        shell: bash
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: true
+
+      - name: Build backend Docker image
+        env:
+          BACKEND_REPO: ${{ env.BACKEND_REPO }}
+          BACKEND_IMAGE_NAME: ${{ env.BACKEND_IMAGE_NAME }}
+        run: |
+          docker build -t $BACKEND_IMAGE_NAME:latest .
+          if [ -z "$BACKEND_REPO" ]; then echo "BACKEND_REPO is empty!"; exit 1; fi
+          docker tag $BACKEND_IMAGE_NAME:latest $BACKEND_REPO:latest
+
+
+      - name: Build frontend Docker image
+        env:
+          FRONTEND_REPO: ${{ env.FRONTEND_REPO }}
+          FRONTEND_IMAGE_NAME: ${{ env.FRONTEND_IMAGE_NAME }}
+        run: |
+          docker build -t $FRONTEND_IMAGE_NAME:latest ./menu-frontend -f ./menu-frontend/Dockerfile.frontend
+          if [ -z "$FRONTEND_REPO" ]; then echo "FRONTEND_REPO is empty!"; exit 1; fi
+          docker tag $FRONTEND_IMAGE_NAME:latest $FRONTEND_REPO:latest
+
+
+      - name: Push backend image to ECR
+        env:
+          BACKEND_REPO: ${{ env.BACKEND_REPO }}
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          if [ -z "$BACKEND_REPO" ]; then echo "BACKEND_REPO is empty!"; exit 1; fi
+          echo "Pushing to $BACKEND_REPO"
+          docker push $BACKEND_REPO:latest
+        shell: bash
+
+      - name: Push frontend image to ECR
+        env:
+          FRONTEND_REPO: ${{ env.FRONTEND_REPO }}
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          if [ -z "$FRONTEND_REPO" ]; then echo "FRONTEND_REPO is empty!"; exit 1; fi
+          echo "Pushing to $FRONTEND_REPO"
+          docker push $FRONTEND_REPO:latest
+        shell: bash
+
+      - name: Save image URIs for Terraform
+        run: |
+          if [ -z "$BACKEND_REPO" ]; then echo "BACKEND_REPO is empty!"; exit 1; fi
+          if [ -z "$FRONTEND_REPO" ]; then echo "FRONTEND_REPO is empty!"; exit 1; fi
+          echo "backend_image=$BACKEND_REPO:latest" >> $GITHUB_ENV
+          echo "frontend_image=$FRONTEND_REPO:latest" >> $GITHUB_ENV
+        shell: bash
+
+  update-ecs:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init
+
+
+      - name: Terraform Plan (update ECS)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "Using backend image: ${{ env.backend_image }}"
+          echo "Using frontend image: ${{ env.frontend_image }}"
+          terraform plan -var="backend_image=${{ env.backend_image }}" -var="frontend_image=${{ env.frontend_image }}" -out=tfplan
+
+      - name: Terraform Apply (update ECS)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -auto-approve tfplan
