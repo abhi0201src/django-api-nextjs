@@ -29,6 +29,26 @@ variable "domain_name" {
 }
 
 variable "backend_environment_variables" {
+  description = "Environment variables for the backend application"
+  type        = map(string)
+  default     = {
+    DEBUG = "False"
+    DJANGO_ALLOWED_HOSTS = "*"
+    CORS_ALLOWED_ORIGINS = "http://localhost:3000"
+  }
+}
+
+variable "default_tags" {
+  description = "Default tags to apply to all resources"
+  type        = map(string)
+  default     = {
+    Project     = "django-nextjs-app"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+  }
+}
+
+variable "backend_environment_variables" {
   description = "Environment variables for backend"
   type        = map(string)
   default = {

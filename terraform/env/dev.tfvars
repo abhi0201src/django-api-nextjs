@@ -5,13 +5,8 @@ environment = "dev"
 backend_environment_variables = {
   DEBUG = "False"
   DJANGO_ALLOWED_HOSTS = "*"
-  CORS_ALLOWED_ORIGINS = "https://${var.domain_name},http://${var.domain_name}"
-  DJANGO_SECRET_KEY = "your-secure-secret-key-here"  # Change this in production
-}
-
-# Frontend environment variables will be injected at build time
-frontend_environment_variables = {
-  NEXT_PUBLIC_API_URL = "https://api.${var.domain_name}"  # Will be set to the backend service URL
+  CORS_ALLOWED_ORIGINS = "http://localhost:3000"
+  DJANGO_SECRET_KEY = "django-insecure-k*9zr39ed7aq2u-temp-key-for-dev"  # Change this in production
 }
 
 default_tags = {
@@ -19,7 +14,3 @@ default_tags = {
   Environment = "dev"
   ManagedBy   = "terraform"
 }
-
-# Load balancer and DNS settings
-enable_https = true
-create_dns_records = true
